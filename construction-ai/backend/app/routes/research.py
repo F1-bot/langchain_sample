@@ -8,9 +8,9 @@ router = APIRouter(prefix="/api", tags=["Research"])
 
 
 @router.post("/research", response_model=ResearchResponse)
-async def search_medical_research(request: ResearchRequest):
+async def search_construction_research(request: ResearchRequest):
     try:
-        raw_results = tavily_service.search_medical_research(
+        raw_results = tavily_service.search_construction_research(
             query=request.query,
             max_results=request.max_results
         )
@@ -22,7 +22,7 @@ async def search_medical_research(request: ResearchRequest):
             for r in formatted_results[:3]
         ])
 
-        summary_prompt = f"""Based on these medical research results, provide a brief summary in 2-3 sentences:
+        summary_prompt = f"""Based on these construction research results, provide a brief summary in 2-3 sentences:
 
 {results_text}
 

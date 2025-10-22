@@ -10,5 +10,5 @@ async def health_check():
     return HealthCheckResponse(
         status="healthy",
         timestamp=datetime.now(),
-        message="MediCare AI Backend is running!"
+        message="Construction AI Backend is running!"
     )

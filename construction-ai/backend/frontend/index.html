@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Construction AI</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Construction AI</h1>
+        <p>Analyze construction documents and images</p>
+        <div class="tabs">
+            <button class="tab-button active" data-tab="agent">AI Agent</button>
+            <button class="tab-button" data-tab="estimator">Cost Estimator</button>
+            <button class="tab-button" data-tab="image">Image Analysis</button>
+            <button class="tab-button" data-tab="research">Research</button>
+        </div>
+        <div id="agent" class="tab-content active">
+            <div id="chat-container"></div>
+            <div class="chat-input">
+                <input type="text" id="chat-input-text" placeholder="Type your message...">
+                <button id="send-chat-btn">Send</button>
+            </div>
+        </div>
+        <div id="image" class="tab-content">
+            <input type="file" id="image-input" accept="image/*">
+            <button id="analyze-image-btn">Analyze Image</button>
+        </div>
+        <div id="research" class="tab-content">
+            <input type="text" id="research-input" placeholder="Enter research query">
+            <button id="research-btn">Search</button>
+        </div>
+        <div id="estimator" class="tab-content">
+            <input type="text" id="estimator-input" placeholder="Enter estimation task (e.g., calculate cost for 50m³ of concrete)...">
+            <button id="estimator-btn">Run Estimator</button>
+        </div>
+        <div class="results">
+            <h2>Results</h2>
+            <div id="results-container"></div>
+        </div>
+    </div>
+    <script src="/static/script.js"></script>
+</body>
+</html>

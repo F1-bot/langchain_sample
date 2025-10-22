@@ -1,6 +1,10 @@
 import os
+from dotenv import load_dotenv
+
 from pydantic_settings import BaseSettings
 from pydantic import Field
+
+load_dotenv()
 from langchain_google_genai import ChatGoogleGenerativeAI
 from functools import lru_cache
 
@@ -8,6 +12,9 @@ from functools import lru_cache
 class Settings(BaseSettings):
     google_api_key: str = Field(..., description="Google Gemini API key")
     tavily_api_key: str = Field(..., description="Tavily API key")
+    langchain_tracing_v2: str = Field(default="true")
+    langchain_endpoint: str = Field(default="https://api.smith.langchain.com")
+    langchain_api_key: str = Field(...)
     host: str = Field(default="0.0.0.0")
     port: int = Field(default=8000)
     cors_origins: str = Field(default="http://localhost:3000")

@@ -6,21 +6,20 @@ class TavilyService:
     def __init__(self):
         self.client = TavilyClient(api_key=settings.tavily_api_key)
 
-    def search_medical_research(self, query: str, max_results: int = 5):
+    def search_construction_research(self, query: str, max_results: int = 5):
         try:
             response = self.client.search(
-                query=f"medical research {query}",
+                query=f"construction research {query}",
                 search_depth="advanced",
                 max_results=max_results,
                 include_domains=[
-                    "pubmed.ncbi.nlm.nih.gov",
-                    "nih.gov",
-                    "who.int",
-                    "cdc.gov",
-                    "mayoclinic.org",
-                    "webmd.com",
-                    "healthline.com",
-                    "medicalnewstoday.com"
+                    "construction.com",
+                    "forconstructionpros.com",
+                    "constructiondive.com",
+                    "constructconnect.com",
+                    "engineering.com",
+                    "architecturaldigest.com",
+                    "buildings.com"
                 ]
             )
             return response

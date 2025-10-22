@@ -12,7 +12,7 @@ class GeminiService:
         try:
             image_b64 = base64.b64encode(image_bytes).decode('utf-8')
 
-            extraction_prompt = """You are a medical text extractor. Extract ALL text from this medical document/record.
+            extraction_prompt = """You are a construction text extractor. Extract ALL text from this construction document/record.
 
 Include:
 - Patient information
@@ -52,7 +52,7 @@ Extract all text now:"""
 
 Répondez UNIQUEMENT en JSON valide."""
             else:
-                prompt = """Analyze this medical record image and provide analysis in JSON format with these keys:
+                prompt = """Analyze this construction record image and provide analysis in JSON format with these keys:
 - summary: Brief overview of what you see
 - key_findings: List of important findings
 - recommendations: Health recommendations

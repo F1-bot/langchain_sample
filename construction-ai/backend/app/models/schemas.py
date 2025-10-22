@@ -10,11 +10,13 @@ class HealthCheckResponse(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=1000)
+    thread_id: str = Field(..., min_length=1)
     language: str = Field(default="en", pattern="^(en|fr)$")
 
 
 class ChatResponse(BaseModel):
     response: str
+    thread_id: str
     language: str
     timestamp: datetime
 
@@ -25,7 +27,7 @@ class AnalysisRequest(BaseModel):
     language: str = Field(default="en")
 
 
-class MedicalAnalysis(BaseModel):
+class ConstructionAnalysis(BaseModel):
     summary: str
     key_findings: list[str]
     recommendations: list[str]
@@ -64,4 +66,12 @@ class ResearchResponse(BaseModel):
     query: str
     results: list[ResearchResult]
     summary: str
+    timestamp: datetime
+
+class EstimatorRequest(BaseModel):
+    task: str = Field(..., min_length=10, max_length=500, description="Детальне завдання для кошторисника")
+
+class EstimatorResponse(BaseModel):
+    response: str
+    artifact_path: str | None = None
     timestamp: datetime
