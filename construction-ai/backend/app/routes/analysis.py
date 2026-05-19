@@ -24,7 +24,7 @@ async def chat_with_ai(request: ChatRequest):
         last_message = response["messages"][-1]
 
         return ChatResponse(
-            response=last_message.content,
+            response=last_message.text,
             thread_id=request.thread_id,
             language=request.language,
             timestamp=datetime.now()
@@ -134,7 +134,7 @@ async def run_estimator(request: EstimatorRequest):
         task_message = HumanMessage(content=request.task)
         response = await estimator_agent.ainvoke({"messages": [task_message]})
 
-        final_response_content = response["messages"][-1].content
+        final_response_content = response["messages"][-1].text
 
         # Проста логіка для визначення, чи був створений файл
         artifact_path = "estimate.txt" if "збережено у файл" in final_response_content.lower() else None

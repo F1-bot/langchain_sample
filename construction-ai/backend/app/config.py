@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     host: str = Field(default="0.0.0.0")
     port: int = Field(default=8000)
     cors_origins: str = Field(default="http://localhost:3000")
-    gemini_model: str = Field(default="gemini-2.0-flash-exp")
+    gemini_model: str = Field(default="gemini-3.1-flash-lite")
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int = Field(default=2048, ge=100, le=8192)
     max_file_size: int = Field(default=10 * 1024 * 1024)
@@ -42,7 +42,6 @@ def load_google_llm():
         google_api_key=settings.google_api_key,
         temperature=settings.temperature,
         max_output_tokens=settings.max_tokens,
-        convert_system_message_to_human=True
     )
 
 
@@ -53,5 +52,4 @@ def load_google_vision_llm():
         google_api_key=settings.google_api_key,
         temperature=0.5,
         max_output_tokens=settings.max_tokens,
-        convert_system_message_to_human=True
     )

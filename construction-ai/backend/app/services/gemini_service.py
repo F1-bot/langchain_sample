@@ -34,7 +34,7 @@ Extract all text now:"""
             )
 
             response = self.vision_llm.invoke([message])
-            return response.content
+            return response.text
 
         except Exception as e:
             raise Exception(f"Image text extraction error: {str(e)}")
@@ -68,12 +68,12 @@ Respond ONLY with valid JSON."""
             )
 
             response = self.vision_llm.invoke([message])
-            result = json.loads(response.content)
+            result = json.loads(response.text)
             return result
 
         except json.JSONDecodeError:
             return {
-                "summary": response.content[:500],
+                "summary": response.text[:500],
                 "key_findings": ["Analysis completed - see summary"],
                 "recommendations": ["Consult with a healthcare professional"],
                 "next_steps": ["Schedule appointment with your doctor"]

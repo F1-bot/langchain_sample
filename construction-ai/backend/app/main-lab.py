@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 print("Ініціалізація LLM (Gemini)...")
-llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash-exp", convert_system_message_to_human=True)
+llm = ChatGoogleGenerativeAI(model="gemini-3.1-flash-lite", convert_system_message_to_human=True)
 
 
 # --- Крок 2: Створення кастомного інструмента ---
@@ -73,7 +73,7 @@ async def main():
     # Для лабораторної роботи ми будемо аналізувати результат
     response = await agent_executor.ainvoke({"messages": [("user", task)]})
 
-    final_response = response['messages'][-1].content
+    final_response = response['messages'][-1].text
 
     print("\n✅ Завдання виконано!")
     print(f"💬 Фінальна відповідь агента: {final_response}")

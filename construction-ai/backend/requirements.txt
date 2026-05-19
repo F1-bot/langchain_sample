@@ -6,7 +6,7 @@ pydantic
 pydantic-settings
 langchain
 langchain-core
-langchain-google-genai
+langchain-google-genai==4.2.2
 tavily-python
 Pillow
 langgraph
