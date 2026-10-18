@@ -51,6 +51,19 @@ setup_console()
 # ══════════════════════════════════════════════════════════════════
 # КРОК 1. Модель
 # ══════════════════════════════════════════════════════════════════
+# Ці моделі мають ФІКСОВАНІ параметри семплювання: temperature, top_p
+# і top_k вони ігнорують. Передасте temperature — langchain-google-genai
+# викине значення й попередить:
+#
+#   UserWarning: Model 'gemini-3.5-flash-lite' uses fixed sampling
+#   defaults; the sampling parameter(s) temperature will be ignored.
+#
+# Поведінка не зміниться, але попередження виглядає як поломка. Перелік
+# не виводиться з номера версії: gemini-3.5-flash параметри читає, а
+# gemini-3.5-flash-lite — ні.
+FIXED_SAMPLING_MODELS = {"gemini-3.5-flash-lite", "gemini-3.6-flash"}
+
+
 def build_llm():
     """
     Ініціалізація Gemini.
@@ -71,12 +84,13 @@ def build_llm():
         print("      https://aistudio.google.com/apikey і покладіть у .env")
         sys.exit(1)
 
-    return ChatGoogleGenerativeAI(
-        model=os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite"),
-        google_api_key=key,
-        temperature=0.3,       # для агента передбачуваність важливіша за творчість
-        max_output_tokens=2048,
-    )
+    model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+    kwargs = {"model": model, "google_api_key": key, "max_output_tokens": 2048}
+    if model not in FIXED_SAMPLING_MODELS:
+        # для агента передбачуваність важливіша за творчість
+        kwargs["temperature"] = 0.3
+
+    return ChatGoogleGenerativeAI(**kwargs)
 
 
 # ══════════════════════════════════════════════════════════════════

@@ -114,28 +114,59 @@ _apply_tracing()
 # ══════════════════════════════════════════════════════════════════
 # LLM
 # ══════════════════════════════════════════════════════════════════
+# Частина нових моделей Gemini має ФІКСОВАНІ параметри семплювання:
+# temperature, top_p і top_k вони просто ігнорують. Якщо передати
+# temperature такій моделі, langchain-google-genai викине значення і
+# попередить:
+#
+#   UserWarning: Model 'gemini-3.5-flash-lite' uses fixed sampling
+#   defaults; the sampling parameter(s) temperature will be ignored.
+#
+# Поведінка від цього не змінюється, але студент бачить попередження
+# на кожному запуску й не розуміє, чи все гаразд. Тому temperature
+# передаємо лише тим моделям, які її насправді читають.
+#
+# Перелік таких моделей не виводиться з номера версії: gemini-3.5-flash
+# параметри читає, а gemini-3.5-flash-lite — ні. Тож питаємо саму
+# бібліотеку, а власний список лишаємо тільки як запасний варіант.
+_FIXED_SAMPLING_MODELS = frozenset({"gemini-3.5-flash-lite", "gemini-3.6-flash"})
+
+
+def model_honours_temperature(model: str) -> bool:
+    """Чи вплине temperature на цю модель."""
+    try:
+        from langchain_google_genai.chat_models import (
+            _uses_fixed_sampling_and_disallows_prefill as _fixed,
+        )
+    except ImportError:          # приватну функцію прибрали або перейменували
+        return model.rsplit("/", 1)[-1].lower() not in _FIXED_SAMPLING_MODELS
+    return not _fixed(model)
+
+
+def _llm_kwargs(temperature: float) -> dict:
+    """Аргументи для ChatGoogleGenerativeAI без параметрів, які модель ігнорує."""
+    kwargs = {
+        "model": settings.gemini_model,
+        "google_api_key": settings.google_api_key,
+        "max_output_tokens": settings.max_tokens,
+    }
+    if model_honours_temperature(settings.gemini_model):
+        kwargs["temperature"] = temperature
+    return kwargs
+
+
 @lru_cache()
 def load_google_llm():
     from langchain_google_genai import ChatGoogleGenerativeAI
 
-    return ChatGoogleGenerativeAI(
-        model=settings.gemini_model,
-        google_api_key=settings.google_api_key,
-        temperature=settings.temperature,
-        max_output_tokens=settings.max_tokens,
-    )
+    return ChatGoogleGenerativeAI(**_llm_kwargs(settings.temperature))
 
 
 @lru_cache()
 def load_google_vision_llm():
     from langchain_google_genai import ChatGoogleGenerativeAI
 
-    return ChatGoogleGenerativeAI(
-        model=settings.gemini_model,
-        google_api_key=settings.google_api_key,
-        temperature=0.2,
-        max_output_tokens=settings.max_tokens,
-    )
+    return ChatGoogleGenerativeAI(**_llm_kwargs(0.2))
 
 
 # ══════════════════════════════════════════════════════════════════

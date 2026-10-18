@@ -9,6 +9,7 @@
 """
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -260,3 +261,130 @@ def test_agents_are_built_lazily():
     started = time.time()
     import app.routes.analysis  # noqa: F401
     assert time.time() - started < 10.0
+
+
+# ══════════════════════════════════════════════════════════════════
+# 6. Застосунок мусить ІМПОРТУВАТИСЬ цілком
+# ══════════════════════════════════════════════════════════════════
+def test_whole_app_imports():
+    """
+    Найдешевший тест у наборі й найкорисніший.
+
+    Попередня версія падала на старті сервера:
+
+        File "app/services/tavily_service.py", line 1
+        ModuleNotFoundError: No module named 'tavily'
+
+    Модуль tavily_service імпортується з routes/research.py, той — з
+    main.py. Тести ж імпортували лише routes/analysis.py і цього не
+    бачили. Імпортуємо застосунок повністю — тоді будь-яка поломка на
+    рівні модуля видно одразу, а не під час демонстрації.
+    """
+    import app.main
+
+    # openapi() обходить і вкладені роутери, і заразом перевіряє, що
+    # схеми відповідей коректні — саме її показує /docs.
+    paths = app.main.app.openapi()["paths"]
+    assert "/api/health" in paths
+    assert "/api/run-estimator" in paths
+    assert "/api/research" in paths
+
+
+def test_importing_app_does_not_build_llm(monkeypatch):
+    """Імпорт не має створювати модель: інакше він повільний і ламкий."""
+    import app.config as cfg
+
+    cfg.load_google_llm.cache_clear()
+    cfg.load_google_vision_llm.cache_clear()
+    assert cfg.load_google_llm.cache_info().currsize == 0
+
+    import app.services.gemini_service as gs  # noqa: F401
+    import app.services.tavily_service as ts  # noqa: F401
+
+    assert cfg.load_google_vision_llm.cache_info().currsize == 0, \
+        "створення моделі на імпорті"
+    assert ts._search_tool.cache_info().currsize == 0, \
+        "створення клієнта Tavily на імпорті"
+
+
+# ══════════════════════════════════════════════════════════════════
+# 7. requirements.txt мусить покривати ВСЕ, що імпортує app/
+# ══════════════════════════════════════════════════════════════════
+def test_requirements_cover_every_import():
+    """
+    Пакет tavily-python був у коді, але не в requirements.txt. У моєму
+    оточенні він лишився від попередньої установки, тож усе працювало;
+    у студента в чистому venv сервер не стартував.
+
+    Тому звіряємо не «чи імпортується», а «чи записано в requirements».
+    """
+    import ast
+    from importlib.metadata import packages_distributions
+
+    imported = set()
+    for path in (ROOT / "app").rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                imported |= {a.name.split(".")[0] for a in node.names}
+            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                imported.add(node.module.split(".")[0])
+
+    third_party = imported - set(sys.stdlib_module_names) - {"app"}
+
+    def canon(name: str) -> str:
+        """PEP 503: langchain_core і langchain-core — той самий пакет."""
+        return re.sub(r"[-_.]+", "-", name).lower()
+
+    req = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    listed = {canon(ln.split("==")[0]) for ln in req.splitlines()
+              if ln.strip() and not ln.strip().startswith("#")}
+
+    # packages_distributions() знає неочевидні відповідності (dotenv ->
+    # python-dotenv), але на частині пакетів повертає None. Тому до неї
+    # додаємо найпростіший здогад: ім'я модуля і є ім'ям пакета.
+    mapping = packages_distributions()
+    missing = []
+    for mod in sorted(third_party):
+        candidates = {canon(d) for d in (mapping.get(mod) or [])} | {canon(mod)}
+        if not candidates & listed:
+            missing.append(f"{mod} (шукали {sorted(candidates)})")
+    assert not missing, f"імпортується, але немає в requirements.txt: {missing}"
+
+
+# ══════════════════════════════════════════════════════════════════
+# 8. temperature передаємо лише тим моделям, які її читають
+# ══════════════════════════════════════════════════════════════════
+def test_temperature_dropped_for_fixed_sampling_model(monkeypatch):
+    """
+    gemini-3.5-flash-lite ігнорує temperature, і бібліотека попереджає
+    про це на кожному виклику. Попередження лякає студента, хоча
+    поведінка правильна. Простіше не передавати те, що все одно
+    викинуть.
+    """
+    import app.config as cfg
+
+    monkeypatch.setattr(cfg.settings, "gemini_model", "gemini-3.5-flash-lite")
+    assert cfg.model_honours_temperature("gemini-3.5-flash-lite") is False
+    assert "temperature" not in cfg._llm_kwargs(0.3)
+
+
+def test_temperature_kept_for_normal_model(monkeypatch):
+    import app.config as cfg
+
+    monkeypatch.setattr(cfg.settings, "gemini_model", "gemini-3.8-flash")
+    assert cfg.model_honours_temperature("gemini-3.8-flash") is True
+    assert cfg._llm_kwargs(0.3)["temperature"] == 0.3
+
+
+def test_no_sampling_warning_for_default_model():
+    """Типова модель із .env.example не має сипати попередженнями."""
+    import warnings
+
+    import app.config as cfg
+
+    cfg.load_google_llm.cache_clear()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        cfg.load_google_llm()
+    noisy = [w for w in caught if "sampling" in str(w.message).lower()]
+    assert not noisy, [str(w.message) for w in noisy]
