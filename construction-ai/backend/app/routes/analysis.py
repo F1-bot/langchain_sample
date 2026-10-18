@@ -9,10 +9,32 @@ from app.chains.analysis_chain import analyze_construction_document
 from app.services.gemini_service import gemini_service
 from app.agents.estimator_agent import create_estimator_agent
 from datetime import datetime
+from functools import lru_cache
+from pathlib import Path
+
 from langchain_core.messages import HumanMessage
 
+from app.config import ARTIFACTS_DIR
+
 router = APIRouter(prefix="/api", tags=["Analysis"])
-agent_executor = create_agent_executor()
+
+
+# Агентів будуємо ЛІНИВО, при першому запиті.
+#
+# Раніше create_agent_executor() і create_estimator_agent() викликались
+# прямо на рівні модуля. Через це будь-яка помилка конфігурації —
+# відсутній ключ, недоступна модель — падала ще під час імпорту, і
+# FastAPI не піднімався взагалі: ні /docs, ні /health. Діагностувати
+# таке зі стектрейсу імпорту незручно. Тепер сервер стартує завжди, а
+# проблема проявляється на конкретному ендпоінті зі зрозумілим кодом.
+@lru_cache(maxsize=1)
+def _chat_agent():
+    return create_agent_executor()
+
+
+@lru_cache(maxsize=1)
+def _estimator_agent():
+    return create_estimator_agent()
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -20,7 +42,7 @@ async def chat_with_ai(request: ChatRequest):
     try:
         config = {"configurable": {"thread_id": request.thread_id}}
         input_message = HumanMessage(content=request.message)
-        response = agent_executor.invoke({"messages": [input_message]}, config)
+        response = _chat_agent().invoke({"messages": [input_message]}, config)
         last_message = response["messages"][-1]
 
         return ChatResponse(
@@ -125,19 +147,26 @@ async def extract_text_from_image(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Text extraction error: {str(e)}")
 
 
-estimator_agent = create_estimator_agent()
-
-
 @router.post("/run-estimator", response_model=EstimatorResponse)
 async def run_estimator(request: EstimatorRequest):
     try:
+        before = _artifact_snapshot()
+
         task_message = HumanMessage(content=request.task)
-        response = await estimator_agent.ainvoke({"messages": [task_message]})
+        response = await _estimator_agent().ainvoke({"messages": [task_message]})
 
         final_response_content = response["messages"][-1].text
 
-        # Проста логіка для визначення, чи був створений файл
-        artifact_path = "estimate.txt" if "збережено у файл" in final_response_content.lower() else None
+        # Чи створено файл — визначаємо ФАКТОМ, а не пошуком підрядка.
+        #
+        # Раніше тут стояло:
+        #     artifact_path = "estimate.txt" if "збережено у файл" in ... else None
+        # Це ламається одразу з кількох боків: модель може написати
+        # «збережено у файл», не викликавши інструмент (і тоді API бреше
+        # про неіснуючий файл); може зберегти під іншим іменем; може
+        # відповісти англійською. Дивимось на теку до і після запуску.
+        created = sorted(_artifact_snapshot() - before)
+        artifact_path = created[-1] if created else None
 
         return EstimatorResponse(
             response=final_response_content,
@@ -146,3 +175,10 @@ async def run_estimator(request: EstimatorRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Estimator agent error: {str(e)}")
+
+
+def _artifact_snapshot() -> set[str]:
+    """Імена файлів у теці артефактів на цей момент."""
+    if not ARTIFACTS_DIR.exists():
+        return set()
+    return {p.name for p in ARTIFACTS_DIR.iterdir() if p.is_file()}

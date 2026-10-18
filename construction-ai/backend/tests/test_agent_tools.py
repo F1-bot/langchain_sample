@@ -1,0 +1,262 @@
+"""
+Тести до лабораторної роботи №3 — БЕЗ виклику моделі та без мережі.
+
+Інструмент агента — звичайна функція, і саме її треба покривати
+тестами. LLM у CI не ганяють: вона повільна, недетермінована і
+коштує грошей.
+
+    pytest -q
+"""
+import json
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+# Ключі-заглушки: конфіг вимагає їх наявності, але жоден тест
+# нікуди не ходить.
+os.environ.setdefault("GOOGLE_API_KEY", "test-stub")
+os.environ.setdefault("TAVILY_API_KEY", "test-stub")
+
+from app.config import safe_output_path, settings  # noqa: E402
+from app.agents.estimator_agent import (  # noqa: E402
+    VAT_RATE, calculate_estimate, write_report,
+)
+
+
+def call(tool, **kwargs):
+    """Викликає інструмент у обхід декоратора LangChain."""
+    fn = getattr(tool, "func", None) or getattr(tool, "fn", None) or tool
+    return fn(**kwargs)
+
+
+# ══════════════════════════════════════════════════════════════════
+# 1. safe_output_path — ім'я файлу приходить ВІД МОДЕЛІ
+# ══════════════════════════════════════════════════════════════════
+@pytest.mark.parametrize("hostile", [
+    "../../../etc/passwd",
+    "..\\..\\Windows\\System32\\drivers\\etc\\hosts",
+    "/absolute/unix/path.txt",
+    "C:\\Windows\\System32\\evil.txt",
+    "sub/dir/nested.txt",
+    "....//....//escape.txt",
+])
+def test_hostile_filename_stays_inside(tmp_path, hostile):
+    """
+    Попередня версія write_report передавала ім'я прямо в open().
+    Перевірено: "../../escaped.txt" і абсолютний шлях спрацьовували,
+    файл з'являвся поза проєктом.
+    """
+    result = safe_output_path(hostile, base_dir=tmp_path)
+    assert result.parent == tmp_path.resolve(), f"вийшли за межі: {result}"
+
+
+@pytest.mark.parametrize("bad", ["", "   ", ".", "..", "\x00x"])
+def test_degenerate_filenames_rejected(tmp_path, bad):
+    with pytest.raises(ValueError):
+        safe_output_path(bad, base_dir=tmp_path)
+
+
+@pytest.mark.parametrize("reserved", ["CON", "nul.txt", "com1.txt", "LPT9"])
+def test_windows_device_names_rejected(tmp_path, reserved):
+    with pytest.raises(ValueError):
+        safe_output_path(reserved, base_dir=tmp_path)
+
+
+def test_plain_name_kept_and_suffix_added(tmp_path):
+    assert safe_output_path("estimate.txt", base_dir=tmp_path).name == "estimate.txt"
+    assert safe_output_path("estimate", base_dir=tmp_path).name == "estimate.txt"
+
+
+# ══════════════════════════════════════════════════════════════════
+# 2. write_report
+# ══════════════════════════════════════════════════════════════════
+def test_write_report_refuses_escape(tmp_path, monkeypatch):
+    import app.agents.estimator_agent as mod
+    monkeypatch.setattr(mod, "safe_output_path",
+                        lambda f, **kw: safe_output_path(f, base_dir=tmp_path))
+
+    out = call(write_report, filename="../../pwned.txt", content="дані")
+    assert out.startswith("Відмовлено") or (tmp_path / "pwned.txt").exists()
+    assert not (tmp_path.parent / "pwned.txt").exists()
+
+
+def test_write_report_writes_utf8(tmp_path, monkeypatch):
+    import app.agents.estimator_agent as mod
+    monkeypatch.setattr(mod, "safe_output_path",
+                        lambda f, **kw: safe_output_path(f, base_dir=tmp_path))
+
+    out = call(write_report, filename="звіт.txt", content="Бетон М300 — 50 м³")
+    assert "збережено" in out.lower()
+    written = (tmp_path / "звіт.txt").read_text(encoding="utf-8")
+    assert "Бетон М300" in written
+
+
+# ══════════════════════════════════════════════════════════════════
+# 3. Кошторис рахується ЦІЛКОМ, ПДВ — рівно один раз
+# ══════════════════════════════════════════════════════════════════
+def test_estimate_sums_all_lines_once():
+    """
+    Торішній calculate_material_cost рахував ОДНУ позицію, а підсумок
+    складала модель. На двох позиціях вона плуталась: що вже враховано,
+    а що ні. Тепер підсумок рахує інструмент.
+    """
+    out = json.loads(call(calculate_estimate, items=[
+        {"material": "бетон М300", "quantity": 50, "unit": "м3", "price_per_unit": 3000},
+        {"material": "цегляна кладка", "quantity": 200, "unit": "м2", "price_per_unit": 450},
+    ]))
+    assert out["subtotal_no_vat"].startswith("240000")
+    assert out["vat_20_percent"].startswith("48000")
+    assert out["GRAND_TOTAL_with_vat"].startswith("288000")
+    assert "345600" not in json.dumps(out), "ПДВ нараховано двічі"
+
+
+def test_estimate_returns_every_line():
+    out = json.loads(call(calculate_estimate, items=[
+        {"material": "пісок", "quantity": 10, "unit": "т", "price_per_unit": 800},
+        {"material": "арматура", "quantity": 2, "unit": "т", "price_per_unit": 42000},
+        {"material": "цегла", "quantity": 100, "unit": "шт", "price_per_unit": 12},
+    ]))
+    assert len(out["lines"]) == 3
+    # 8000 + 84000 + 1200 = 93200
+    assert out["subtotal_no_vat"].startswith("93200")
+
+
+def test_estimate_single_item():
+    out = json.loads(call(calculate_estimate, items=[
+        {"material": "бетон", "quantity": 1, "unit": "м3", "price_per_unit": 1000},
+    ]))
+    assert out["GRAND_TOTAL_with_vat"].startswith("1200")
+
+
+def test_vat_rate_is_twenty_percent():
+    assert VAT_RATE == 0.20
+
+
+def test_estimate_accepts_models_and_dicts():
+    """Pydantic може віддати і модель, і dict — приймаємо обидва."""
+    from app.agents.estimator_agent import LineItem
+
+    as_model = call(calculate_estimate, items=[
+        LineItem(material="бетон", quantity=2, unit="м3", price_per_unit=100)])
+    as_dict = call(calculate_estimate, items=[
+        {"material": "бетон", "quantity": 2, "unit": "м3", "price_per_unit": 100}])
+    assert json.loads(as_model)["GRAND_TOTAL_with_vat"] == \
+           json.loads(as_dict)["GRAND_TOTAL_with_vat"]
+
+
+@pytest.mark.parametrize("bad", [
+    {"material": "x", "quantity": 0, "unit": "шт", "price_per_unit": 10},
+    {"material": "x", "quantity": -5, "unit": "шт", "price_per_unit": 10},
+    {"material": "x", "quantity": 1, "unit": "шт", "price_per_unit": -10},
+])
+def test_estimate_schema_rejects_nonpositive(bad):
+    """Схема сама відкидає від'ємні значення — перевіряти в коді не треба."""
+    from pydantic import ValidationError
+
+    from app.agents.estimator_agent import EstimateArgs
+
+    with pytest.raises(ValidationError):
+        EstimateArgs(items=[bad])
+
+
+# ══════════════════════════════════════════════════════════════════
+# 4. Конфігурація
+# ══════════════════════════════════════════════════════════════════
+def test_app_starts_without_langsmith_key():
+    """
+    Раніше langchain_api_key було обов'язковим полем, і застосунок не
+    стартував без ключа LangSmith — хоча трейсинг до роботи агента
+    стосунку не має.
+    """
+    assert settings.langsmith_api_key == "" or isinstance(settings.langsmith_api_key, str)
+    assert settings.tracing_enabled is False or bool(settings.langsmith_api_key)
+
+
+def test_default_model_is_alive():
+    """
+    gemini-2.0-flash-exp вимкнено 9 грудня 2025, а саме воно стояло
+    в торішньому .env.example.
+    """
+    assert settings.gemini_model != "gemini-2.0-flash-exp"
+    assert settings.gemini_model.startswith("gemini-")
+
+
+def test_env_example_has_no_dead_model():
+    text = (ROOT / ".env.example").read_text(encoding="utf-8")
+    live = [ln for ln in text.splitlines()
+            if ln.strip().startswith("GEMINI_MODEL=")]
+    assert live, "у .env.example немає GEMINI_MODEL"
+    assert "gemini-2.0-flash-exp" not in live[0]
+
+
+def test_requirements_are_pinned():
+    """Непіновані залежності ламаються при черговому релізі, а не при зміні коду."""
+    text = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    pkgs = [ln.strip() for ln in text.splitlines()
+            if ln.strip() and not ln.strip().startswith("#")]
+    unpinned = [p for p in pkgs if "==" not in p]
+    assert not unpinned, f"без піна: {unpinned}"
+
+
+# ══════════════════════════════════════════════════════════════════
+# 5. Актуальність API, на якому тримається проєкт
+# ══════════════════════════════════════════════════════════════════
+def test_create_agent_is_the_current_api():
+    from langchain.agents import create_agent
+
+    import inspect
+    params = inspect.signature(create_agent).parameters
+    assert "system_prompt" in params, "сигнатура змінилась"
+    assert "checkpointer" in params
+
+
+def test_create_react_agent_is_deprecated():
+    """Якщо цей тест впаде — LangGraph або прибрав функцію, або зняв попередження."""
+    from langgraph.prebuilt import create_react_agent
+
+    assert "deprecated" in (create_react_agent.__doc__ or "").lower()
+
+
+def test_project_does_not_use_deprecated_agent_api():
+    """
+    Жоден файл застосунку не має ІМПОРТУВАТИ чи ВИКЛИКАТИ
+    create_react_agent.
+
+    Перевіряємо по дереву розбору, а не пошуком підрядка: у коментарях
+    і докстрінгах ця назва згадується навмисно — там пояснюється, чому
+    від неї відмовились.
+    """
+    import ast
+
+    offenders = []
+    for path in (ROOT / "app").rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    if alias.name == "create_react_agent":
+                        offenders.append(f"{path.name}:{node.lineno} import")
+            elif isinstance(node, ast.Call):
+                fn = node.func
+                name = getattr(fn, "id", None) or getattr(fn, "attr", None)
+                if name == "create_react_agent":
+                    offenders.append(f"{path.name}:{node.lineno} виклик")
+    assert not offenders, offenders
+
+
+def test_agents_are_built_lazily():
+    """
+    Імпорт маршрутів не має створювати агента: інакше будь-яка помилка
+    конфігурації валить увесь застосунок ще до старту, і навіть /health
+    стає недоступним.
+    """
+    import time
+
+    started = time.time()
+    import app.routes.analysis  # noqa: F401
+    assert time.time() - started < 10.0

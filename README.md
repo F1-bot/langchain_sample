@@ -32,6 +32,37 @@
 | **Pydantic**       | Data validation          | Ensures type safety and automatic validation for requests/responses. |
 | **Python 3.11+**   | Programming language     | Modern syntax and an extensive ecosystem of libraries.          |
 
+## 🔄 What changed in the 2026 update
+
+**[EN]** This project was audited and brought up to date against LangChain 1.x.
+**[UA]** Проєкт перевірено й оновлено під LangChain 1.x. Нижче — що саме
+й чому; кожен пункт відтворювався запуском, а не припущенням.
+
+| Було | Стало | Чому |
+|---|---|---|
+| `langgraph.prebuilt.create_react_agent` | `langchain.agents.create_agent` | бібліотека сама друкує: *"Deprecated in LangGraph V1.0 to be removed in V2.0"* |
+| `calculate_material_cost` рахував одну позицію | `calculate_estimate` рахує весь кошторис | підсумок складала модель і плуталась; тепер рахує інструмент |
+| `write_report` писав за будь-яким шляхом | через `safe_output_path()` | перевірено: `../../x.txt` і абсолютний шлях спрацьовували |
+| `langchain_api_key` обов'язковий | LangSmith необов'язковий | без ключа застосунок не стартував |
+| `gemini-2.0-flash-exp` у `.env.example` | `gemini-3.5-flash-lite` | стару модель вимкнено 09.12.2025 |
+| агенти створювались на імпорті | ліниво, при першому запиті | помилка конфігурації валила весь сервер, включно з `/health` |
+| файл визначався пошуком підрядка | порівнянням вмісту теки | модель могла сказати «збережено», не викликавши інструмент |
+| залежності без версій | усе закріплено | проєкт ламався від чужого релізу, а не від своїх змін |
+| тестів не було | 34 тести | без моделі й без мережі, ~2 с |
+
+Детальніше про `create_agent` і межу інструмента — у матеріалах Лекції 6.
+
+### Tests
+
+```bash
+cd construction-ai/backend
+pytest -q          # 34 passed — ні моделі, ні мережі не потрібно
+```
+
+Тести навмисно не торкаються LLM: вона повільна, недетермінована й
+коштує грошей. Перевіряються інструменти, схеми й конфігурація —
+тобто рівно те, що ви пишете самі.
+
 ## ⚙️ Setup & Installation
 
 Follow these steps to set up and run the project.
@@ -42,9 +73,14 @@ Ensure you have the following installed:
 -   Python 3.11+
 -   `pip` (Python package manager)
 -   **API Keys (free tiers available):**
-    -   **Google Gemini API key:** [Get it here](https://aistudio.google.com/app/apikey)
-    -   **Tavily API key:** [Get it here](https://app.tavily.com/)
-    -   **LangSmith API key:** [Get it here](https://smith.langchain.com/) (Recommended for tracing)
+    -   **Google Gemini API key** — required: [get it here](https://aistudio.google.com/apikey)
+    -   **Tavily API key** — required for web search: [get it here](https://app.tavily.com/)
+    -   **LangSmith API key** — **optional**, tracing only: [get it here](https://smith.langchain.com/)
+
+> **[UA]** Ключ LangSmith НЕ обов'язковий. Раніше застосунок без нього
+> взагалі не стартував (`langchain_api_key` було обов'язковим полем і
+> Pydantic падав із ValidationError ще до запуску сервера). Тепер без
+> нього все працює, просто трейси нікуди не йдуть.
 
 ### 2. Clone and Set Up the Environment
 
@@ -73,11 +109,21 @@ Create a `.env` file in the `backend/` directory. You can copy the contents of `
 ```env
 GOOGLE_API_KEY=AIzaSy...your_gemini_key
 TAVILY_API_KEY=tvly-...your_tavily_key
-LANGCHAIN_TRACING_V2=true
-LANGCHAIN_ENDPOINT=https://api.smith.langchain.com
-LANGCHAIN_API_KEY=lsv2_pt_...your_langsmith_key
+
+# Model. gemini-3.5-flash-lite is free-tier and fast enough for this lab.
+GEMINI_MODEL=gemini-3.5-flash-lite
+
+# Optional — tracing only. Note the names: LANGCHAIN_* were renamed to LANGSMITH_*.
+# LANGSMITH_API_KEY=lsv2_pt_...
+# LANGSMITH_TRACING=true
 ```
-**IMPORTANT:** Add the `.env` file to your `.gitignore` to prevent leaking your secret keys.
+
+**⚠️ Do NOT use `gemini-2.0-flash-exp`.** That value was in last year's
+`.env.example`, and the model was shut down on 9 December 2025. The symptom
+is a `404 NOT_FOUND` on the agent's very first call. Current model list:
+<https://ai.google.dev/gemini-api/docs/models>
+
+**IMPORTANT:** `.env` is already in `.gitignore` — keep it that way.
 
 ## ▶️ Running the Application
 

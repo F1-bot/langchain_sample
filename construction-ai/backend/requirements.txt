@@ -1,13 +1,41 @@
-fastapi
-uvicorn
-python-dotenv
-python-multipart
-pydantic
-pydantic-settings
-langchain
-langchain-core
-langchain-google-genai==4.2.2
-tavily-python
-Pillow
-langgraph
-langchain-tavily
+# ══════════════════════════════════════════════════════════════════
+# Лабораторна робота №3 — AI-агент на LangChain + Gemini + Tavily
+# Python >= 3.11
+#
+#   python -m venv venv
+#   venv\Scripts\activate        (Windows)   /   source venv/bin/activate
+#   pip install -r requirements.txt
+#
+# Версії ЗАФІКСОВАНО станом на 18 жовтня 2026 і перевірено запуском.
+# Раніше тут майже не було пінів — а LangChain і LangGraph за рік
+# перейшли в мажорну 1.x і змінили публічний API. Непіновані
+# залежності означають, що проєкт ламається не тоді, коли ви щось
+# змінили, а тоді, коли вийшов новий реліз.
+# ══════════════════════════════════════════════════════════════════
+
+# ── Бекенд ────────────────────────────────────────────────────────
+fastapi==0.143.3
+uvicorn==0.54.0
+python-dotenv==1.2.4
+python-multipart==0.0.20
+pydantic==2.14.1
+pydantic-settings==2.13.0
+
+# ── LangChain / LangGraph ─────────────────────────────────────────
+# УВАГА: у 1.x актуальна функція — langchain.agents.create_agent.
+# Стара langgraph.prebuilt.create_react_agent ще працює, але сама
+# попереджає: "Deprecated in LangGraph V1.0 to be removed in V2.0".
+langchain==1.4.6
+langchain-core==1.6.12
+langgraph==1.2.16
+
+# ── Моделі та інструменти ─────────────────────────────────────────
+langchain-google-genai==4.4.2
+langchain-tavily==0.2.18
+
+# ── Зображення ────────────────────────────────────────────────────
+Pillow==12.1.0
+
+# ── Тести (модель і мережа не потрібні) ───────────────────────────
+pytest==9.1.1
+httpx==0.28.1
