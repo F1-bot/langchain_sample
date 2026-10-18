@@ -388,3 +388,98 @@ def test_no_sampling_warning_for_default_model():
         cfg.load_google_llm()
     noisy = [w for w in caught if "sampling" in str(w.message).lower()]
     assert not noisy, [str(w.message) for w in noisy]
+
+
+# ══════════════════════════════════════════════════════════════════
+# 9. Аргументи, які шлемо в Tavily, мусять збігатися з його схемою
+# ══════════════════════════════════════════════════════════════════
+def test_search_payload_matches_tool_schema():
+    """
+    max_results у TavilySearch задається ЛИШЕ при створенні. Переданий
+    у invoke(), він не падає винятком, а повертає
+
+        {"error": "The parameter 'max_results' can only be set during
+         instantiation, not during invocation."}
+
+    — і /api/research віддає 500. Звіряємо ключі, які шлемо, зі схемою
+    інструмента: мережа для цього не потрібна.
+    """
+    from langchain_tavily.tavily_search import TavilySearchInput
+
+    from app.services.tavily_service import search_payload
+
+    sent = set(search_payload("цемент М500"))
+    allowed = set(TavilySearchInput.model_fields)
+    assert sent <= allowed, f"інструмент не приймає: {sorted(sent - allowed)}"
+    assert "max_results" not in allowed, \
+        "max_results знову став параметром виклику — спростіть код"
+
+
+def test_search_tool_is_built_per_max_results(monkeypatch):
+    """Різним max_results потрібні різні інструменти, бо значення вшите."""
+    import app.services.tavily_service as ts
+
+    monkeypatch.setattr(ts.settings, "tavily_api_key", "stub")
+    ts._search_tool.cache_clear()
+    try:
+        assert ts._search_tool(3).max_results == 3
+        assert ts._search_tool(7).max_results == 7
+    finally:
+        ts._search_tool.cache_clear()
+
+
+def test_search_without_key_explains_itself(monkeypatch):
+    import app.services.tavily_service as ts
+
+    monkeypatch.setattr(ts.settings, "tavily_api_key", "")
+    ts._search_tool.cache_clear()
+    try:
+        with pytest.raises(RuntimeError, match="TAVILY_API_KEY"):
+            ts.tavily_service.search_construction_research("бетон")
+    finally:
+        ts._search_tool.cache_clear()
+
+
+# ══════════════════════════════════════════════════════════════════
+# 10. Визначення артефакту: створення І перезапис
+# ══════════════════════════════════════════════════════════════════
+def test_overwritten_artifact_is_detected(tmp_path, monkeypatch):
+    """
+    Перший варіант порівнював лише ІМЕНА файлів. На другому запуску з
+    тим самим estimate.txt нове ім'я не з'являється, і API повертав
+    artifact_path: null, хоча агент файл зберіг. Відтворено запуском.
+    """
+    import time
+
+    import app.routes.analysis as mod
+
+    monkeypatch.setattr(mod, "ARTIFACTS_DIR", tmp_path)
+    existing = tmp_path / "estimate.txt"
+    existing.write_text("старий кошторис", encoding="utf-8")
+
+    before = mod._artifact_snapshot()
+    time.sleep(0.01)
+    existing.write_text("новий кошторис, інший розмір", encoding="utf-8")
+    after = mod._artifact_snapshot()
+
+    assert mod._newest_touched(before, after) == "estimate.txt"
+
+
+def test_new_artifact_is_detected(tmp_path, monkeypatch):
+    import app.routes.analysis as mod
+
+    monkeypatch.setattr(mod, "ARTIFACTS_DIR", tmp_path)
+    before = mod._artifact_snapshot()
+    (tmp_path / "pwned.txt").write_text("x", encoding="utf-8")
+    assert mod._newest_touched(before, mod._artifact_snapshot()) == "pwned.txt"
+
+
+def test_untouched_artifacts_report_nothing(tmp_path, monkeypatch):
+    """Агент нічого не зберігав — API не має вигадувати файл."""
+    import app.routes.analysis as mod
+
+    monkeypatch.setattr(mod, "ARTIFACTS_DIR", tmp_path)
+    (tmp_path / "old.txt").write_text("лежить собі", encoding="utf-8")
+
+    before = mod._artifact_snapshot()
+    assert mod._newest_touched(before, mod._artifact_snapshot()) is None

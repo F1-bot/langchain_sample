@@ -165,8 +165,7 @@ async def run_estimator(request: EstimatorRequest):
         # «збережено у файл», не викликавши інструмент (і тоді API бреше
         # про неіснуючий файл); може зберегти під іншим іменем; може
         # відповісти англійською. Дивимось на теку до і після запуску.
-        created = sorted(_artifact_snapshot() - before)
-        artifact_path = created[-1] if created else None
+        artifact_path = _newest_touched(before, _artifact_snapshot())
 
         return EstimatorResponse(
             response=final_response_content,
@@ -177,8 +176,32 @@ async def run_estimator(request: EstimatorRequest):
         raise HTTPException(status_code=500, detail=f"Estimator agent error: {str(e)}")
 
 
-def _artifact_snapshot() -> set[str]:
-    """Імена файлів у теці артефактів на цей момент."""
+def _artifact_snapshot() -> dict[str, tuple[int, int]]:
+    """
+    Стан теки артефактів: ім'я -> (розмір, час зміни).
+
+    Самих ІМЕН недостатньо. Перший варіант цієї функції повертав
+    множину імен, і різниця множин показувала «що з'явилось». На
+    другому ж запуску з тим самим estimate.txt нове ім'я не
+    з'являється — файл перезаписується. Перевірено запуском: агент
+    чесно зберіг файл, а API повернув artifact_path: null.
+
+    А це типовий сценарій: студент двічі поспіль просить зберегти
+    у estimate.txt.
+    """
     if not ARTIFACTS_DIR.exists():
-        return set()
-    return {p.name for p in ARTIFACTS_DIR.iterdir() if p.is_file()}
+        return {}
+    snapshot = {}
+    for p in ARTIFACTS_DIR.iterdir():
+        if p.is_file():
+            st = p.stat()
+            snapshot[p.name] = (st.st_size, st.st_mtime_ns)
+    return snapshot
+
+
+def _newest_touched(before: dict, after: dict) -> str | None:
+    """Останній файл, який агент створив АБО перезаписав."""
+    touched = [name for name, meta in after.items() if before.get(name) != meta]
+    if not touched:
+        return None
+    return max(touched, key=lambda name: after[name][1])

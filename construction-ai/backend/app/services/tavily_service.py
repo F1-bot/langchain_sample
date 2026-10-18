@@ -35,9 +35,19 @@ CONSTRUCTION_DOMAINS = [
 ]
 
 
-@lru_cache(maxsize=1)
-def _search_tool():
-    """Створює інструмент пошуку один раз, при першому зверненні."""
+@lru_cache(maxsize=8)
+def _search_tool(max_results: int = 5):
+    """
+    Створює інструмент пошуку при першому зверненні й кешує його.
+
+    УВАГА на max_results. Його можна задати ЛИШЕ при створенні
+    інструмента. Якщо передати його в invoke(), Tavily поверне:
+
+        The parameter 'max_results' can only be set during
+        instantiation, not during invocation.
+
+    Тому кешуємо по значенню max_results, а не один інструмент на всіх.
+    """
     from langchain_tavily import TavilySearch
     from langchain_tavily._utilities import TavilySearchAPIWrapper
 
@@ -49,20 +59,27 @@ def _search_tool():
 
     return TavilySearch(
         api_wrapper=TavilySearchAPIWrapper(tavily_api_key=settings.tavily_api_key),
-        max_results=5,
+        max_results=max_results,
         search_depth="advanced",
         include_domains=CONSTRUCTION_DOMAINS,
     )
+
+
+def search_payload(query: str) -> dict:
+    """
+    Аргументи, які передаємо в invoke().
+
+    Винесено окремо, щоб тест міг звірити їх зі схемою інструмента, не
+    ходячи в мережу: саме зайвий ключ у цьому словнику й ламав пошук.
+    """
+    return {"query": f"construction research {query}"}
 
 
 class TavilyService:
     """Тонка обгортка: решта коду не знає, яким саме пакетом ми шукаємо."""
 
     def search_construction_research(self, query: str, max_results: int = 5):
-        raw = _search_tool().invoke({
-            "query": f"construction research {query}",
-            "max_results": max_results,
-        })
+        raw = _search_tool(max_results).invoke(search_payload(query))
         # TavilySearch на помилці повертає {"error": ...}, а не кидає виняток.
         if isinstance(raw, dict) and raw.get("error"):
             raise RuntimeError(f"Помилка пошуку Tavily: {raw['error']}")
